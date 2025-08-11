@@ -1,39 +1,46 @@
-# runway_video_to_video.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import requests
+import os
 
-from runwayml import RunwayML
+# Create FastAPI app
+app = FastAPI(title="Video-to-Video Generation API", version="1.0.0")
 
-def main():
-    # Initialize client (make sure RUNWAYML_API_SECRET is set in your env)
-    client = RunwayML()
+# Example request model
+class VideoToVideoRequest(BaseModel):
+    prompt_video: str   # URL to input video
+    prompt_text: str    # Description for generation
 
-    # Parameters - update these!
-    input_video_url = "https://example.com/input_video.mp4"
-    reference_image_url = "https://example.com/reference_image.jpg"
-    prompt_text = "A cinematic style transformation with vibrant colors and smooth motion."
-    model_name = "gen4_aleph"
-    output_ratio = "1280:720"
-    seed = 12345  # optional, use None for random
+@app.get("/")
+def read_root():
+    return {"message": "Video-to-video backend is running"}
 
-    print("Starting video-to-video generation task...")
-    task = client.video_to_video.create(
-        model=model_name,
-        videoUri=input_video_url,
-        promptText=prompt_text,
-        ratio=output_ratio,
-        seed=seed,
-        references=[
-            {
-                "type": "image",
-                "uri": reference_image_url
-            }
-        ],
-        contentModeration={
-            "publicFigureThreshold": "auto"
+@app.post("/generate-video")
+def generate_video(request: VideoToVideoRequest):
+    try:
+        # Example: Replace this with your actual video generation call
+        runway_api_url = os.getenv("RUNWAY_API_URL")
+        runway_api_key = os.getenv("RUNWAY_API_KEY")
+
+        if not runway_api_url or not runway_api_key:
+            raise HTTPException(status_code=500, detail="Runway API credentials not set")
+
+        payload = {
+            "input_video": request.prompt_video,
+            "prompt": request.prompt_text
         }
-    ).wait_for_task_output()
 
-    print("Task completed! Output:")
-    print(task)
+        headers = {
+            "Authorization": f"Bearer {runway_api_key}",
+            "Content-Type": "application/json"
+        }
 
-if __name__ == "__main__":
-    main()
+        resp = requests.post(runway_api_url, json=payload, headers=headers)
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+        return resp.json()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
