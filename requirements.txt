@@ -1,3 +1,6 @@
-git add requirements.txt
-git commit -m "Add runwayml and other dependencies for video-to-video"
-git push
+fastapi==0.110.0
+uvicorn==0.27.1
+pydantic>=2.5.1
+requests==2.31.0
+boto3>=1.34.0
+runwayml>=1.0.0
