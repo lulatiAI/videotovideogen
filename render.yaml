@@ -1,1 +1,5 @@
-pythonVersion: "3.12.6"
+services:
+  - type: web
+    name: videotovideogen
+    env: python
+    pythonVersion: "3.12.6"
