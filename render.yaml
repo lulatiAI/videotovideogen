@@ -3,11 +3,3 @@ services:
     name: videotovideogen
     env: python
     pythonVersion: "3.12.6"
-runwayml
-fastapi==0.110.0
-uvicorn==0.27.1
-pydantic>=2.5.1
-requests==2.31.0
-boto3>=1.30.0
-runwayml
-python-multipart>=0.0.6
