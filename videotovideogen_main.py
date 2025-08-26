@@ -11,18 +11,17 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import asyncio
 
-# Optional SDK for RunwayML
+# RunwayML SDK
 try:
     from runwayml import RunwayML
     RUNWAY_SDK_AVAILABLE = True
-except Exception:
+except ImportError:
     RUNWAY_SDK_AVAILABLE = False
 
 # -----------------------------------------------------------------------------
 # App & CORS
 # -----------------------------------------------------------------------------
 app = FastAPI(title="Video-to-Video Generation API", version="1.0.0")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -94,7 +93,7 @@ def _s3_key_from_presigned_or_path(url: str) -> str:
 def _public_s3_url(key: str) -> str:
     return f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
 
-def _copy_external_video_to_bucket(external_url: str) -> str:
+async def _copy_external_video_to_bucket(external_url: str) -> str:
     ext = "mp4"
     if "." in external_url.split("?")[0]:
         maybe_ext = external_url.split("?")[0].split(".")[-1].lower()
@@ -106,20 +105,29 @@ def _copy_external_video_to_bucket(external_url: str) -> str:
     s3_client.upload_fileobj(resp.raw, BUCKET_NAME, unique_key, ExtraArgs={"ContentType": f"video/{ext}"})
     return unique_key
 
-def _start_video_moderation(bucket: str, key: str, min_confidence: int = 80) -> str:
+async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 80) -> str:
     try:
         response = rekognition.start_content_moderation(
             Video={"S3Object": {"Bucket": bucket, "Name": key}},
             MinConfidence=min_confidence,
         )
-        return response["JobId"]
+        job_id = response["JobId"]
+        # Poll asynchronously
+        while True:
+            status = rekognition.get_content_moderation(JobId=job_id)
+            if status["JobStatus"] in ["SUCCEEDED", "FAILED"]:
+                break
+            await asyncio.sleep(2)
+        if status["JobStatus"] == "FAILED":
+            raise HTTPException(status_code=500, detail="Rekognition moderation failed")
+        # Simple check: if any ModerationLabels are found, mark rejected
+        if status.get("ModerationLabels"):
+            raise HTTPException(status_code=400, detail="Video flagged by content moderation")
+        return key
     except (BotoCoreError, ClientError) as e:
         raise HTTPException(status_code=500, detail=f"Rekognition error: {e}")
 
 async def _poll_runway_task(task_id: str) -> str:
-    """
-    Poll RunwayML task asynchronously until done.
-    """
     while True:
         status = RUNWAY_CLIENT.tasks.retrieve(task_id)
         if status.status in ["SUCCEEDED", "FAILED"]:
@@ -173,8 +181,7 @@ async def upload_video(file: UploadFile = File(...)):
         Body=contents,
         ContentType=file.content_type or f"video/{ext}"
     )
-    job_id = _start_video_moderation(BUCKET_NAME, key)
-    # Poll synchronously here if you want; can convert to async if needed
+    await _start_video_moderation(BUCKET_NAME, key)
     return {"url": _public_s3_url(key), "status": "APPROVED"}
 
 @app.post("/generate-video")
@@ -183,7 +190,7 @@ async def generate_video(request: VideoToVideoRequest):
     if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
         src_key = _s3_key_from_presigned_or_path(input_url)
     else:
-        src_key = _copy_external_video_to_bucket(input_url)
+        src_key = await _copy_external_video_to_bucket(input_url)
     s3_url = _public_s3_url(src_key)
     output_url = await _run_runway_video_to_video(
         model=request.model,
