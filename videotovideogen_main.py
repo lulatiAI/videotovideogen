@@ -11,7 +11,6 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import io
 import asyncio
-import functools
 
 # RunwayML SDK
 try:
@@ -70,8 +69,9 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 class VideoToVideoRequest(BaseModel):
     video: HttpUrl
     prompt_text: str
-    model: str = "gen4_aleph"
+    model: str = "gen4_aleph"  # updated to Gen 4 Aleph
     ratio: str = "1280:720"
+    duration: int = 5  # default duration in seconds (5 or 10)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -104,7 +104,7 @@ async def _copy_external_video_to_bucket(external_url: str) -> str:
     unique_key = f"uploads/video/{uuid.uuid4()}.{ext}"
     resp = requests.get(external_url, stream=True, timeout=60)
     resp.raise_for_status()
-    await _upload_fileobj_async(resp.raw, BUCKET_NAME, unique_key, extra_args={"ContentType": f"video/{ext}"})
+    s3_client.upload_fileobj(resp.raw, BUCKET_NAME, unique_key, ExtraArgs={"ContentType": f"video/{ext}"})
     return unique_key
 
 async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 80) -> str:
@@ -127,18 +127,20 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
     except (BotoCoreError, ClientError) as e:
         raise HTTPException(status_code=500, detail=f"Rekognition error: {e}")
 
-async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str) -> str:
+async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str, duration: int) -> str:
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
             status_code=500,
             detail="`runwayml` SDK not installed. Add `runwayml>=1.0.0` to requirements.txt."
         )
     try:
+        # Use Gen 4 Aleph for video-to-video
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
             video_uri=video_url,
             prompt_text=prompt_text,
-            ratio=ratio
+            ratio=ratio,
+            duration=duration  # pass duration to Runway
         )
         output_task = task.wait_for_task_output()
         output_url = output_task.output[0] if output_task.output else None
@@ -147,17 +149,6 @@ async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: st
         return output_url
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RunwayML error: {e}")
-
-async def _upload_fileobj_async(fileobj, bucket, key, extra_args=None):
-    loop = asyncio.get_event_loop()
-    func = functools.partial(
-        s3_client.upload_fileobj,
-        fileobj,
-        bucket,
-        key,
-        ExtraArgs=extra_args or {}
-    )
-    await loop.run_in_executor(None, func)
 
 # -----------------------------------------------------------------------------
 # Routes
@@ -177,23 +168,23 @@ async def upload_video(file: UploadFile = File(...)):
     ext = file.filename.split(".")[-1].lower()
     if ext not in ["mp4", "mov", "webm", "m4v"]:
         return JSONResponse(status_code=400, content={"error": "Invalid video format."})
-    
     key = f"uploads/video/{uuid.uuid4()}.{ext}"
     
-    await _upload_fileobj_async(
+    # Streaming upload
+    s3_client.upload_fileobj(
         file.file,
         BUCKET_NAME,
         key,
-        extra_args={"ContentType": file.content_type or f"video/{ext}"}
+        ExtraArgs={"ContentType": file.content_type or f"video/{ext}"}
     )
 
     await _start_video_moderation(BUCKET_NAME, key)
 
-    return JSONResponse({"url": _public_s3_url(key), "status": "APPROVED"})
+    return {"url": _public_s3_url(key), "status": "APPROVED"}
 
 @app.post("/generate-video")
 async def generate_video(request: VideoToVideoRequest):
-    request.model = "gen4_aleph"
+    request.model = "gen4_aleph"  # FORCE Gen 4 Aleph
 
     input_url = str(request.video)
     if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
@@ -207,15 +198,13 @@ async def generate_video(request: VideoToVideoRequest):
         model=request.model,
         video_url=s3_url,
         prompt_text=request.prompt_text,
-        ratio=request.ratio
+        ratio=request.ratio,
+        duration=request.duration  # pass duration here
     )
 
-    # Stream video content
-    try:
-        video_resp = requests.get(output_url, stream=True, timeout=300)
-        video_resp.raise_for_status()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch generated video: {e}")
+    # Return video content directly
+    video_resp = requests.get(output_url, stream=True, timeout=300)
+    video_resp.raise_for_status()
 
     return StreamingResponse(
         io.BytesIO(video_resp.content),
