@@ -10,6 +10,7 @@ import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import io
+import asyncio
 
 # RunwayML SDK
 try:
@@ -67,8 +68,8 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 # -----------------------------------------------------------------------------
 class VideoToVideoRequest(BaseModel):
     video: HttpUrl
-    prompt_text: str = ""
-    model: str = "gen3_alpha_turbo"  # force Gen 3 only
+    prompt_text: str
+    model: str = "gen4_aleph"  # updated to Gen 4 Aleph
     ratio: str = "1280:720"
 
 # -----------------------------------------------------------------------------
@@ -116,6 +117,7 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
             status = rekognition.get_content_moderation(JobId=job_id)
             if status["JobStatus"] in ["SUCCEEDED", "FAILED"]:
                 break
+            await asyncio.sleep(2)
         if status["JobStatus"] == "FAILED":
             raise HTTPException(status_code=500, detail="Rekognition moderation failed")
         if status.get("ModerationLabels"):
@@ -131,7 +133,7 @@ async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: st
             detail="`runwayml` SDK not installed. Add `runwayml>=1.0.0` to requirements.txt."
         )
     try:
-        # Corrected RunwayML call
+        # Use Gen 4 Aleph for video-to-video
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
             video_uri=video_url,
@@ -180,7 +182,7 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/generate-video")
 async def generate_video(request: VideoToVideoRequest):
-    request.model = "gen3_alpha_turbo"  # Force Gen 3
+    request.model = "gen4_aleph"  # FORCE Gen 4 Aleph for video-to-video
 
     input_url = str(request.video)
     if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
