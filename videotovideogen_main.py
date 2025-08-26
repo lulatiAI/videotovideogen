@@ -12,7 +12,7 @@ import uuid
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# Optional SDK for RunwayML
+# Optional SDK for RunwayML (mirrors your image-to-video service)
 try:
     from runwayml import RunwayML
     RUNWAY_SDK_AVAILABLE = True
@@ -62,6 +62,7 @@ rekognition = boto3.client(
     region_name=AWS_REGION,
 )
 
+# Runway client (if SDK is present)
 RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else None
 
 # -----------------------------------------------------------------------------
@@ -105,7 +106,6 @@ def _copy_external_video_to_bucket(external_url: str) -> str:
             maybe_ext = external_url.split("?")[0].split(".")[-1].lower()
             if maybe_ext in ["mp4", "mov", "webm", "m4v"]:
                 ext = maybe_ext
-
         unique_key = f"uploads/video/{uuid.uuid4()}.{ext}"
         resp = requests.get(external_url, stream=True, timeout=60)
         resp.raise_for_status()
@@ -148,23 +148,29 @@ def _poll_video_moderation(job_id: str, max_wait_seconds: int = 120, poll_every:
                 continue
         except (BotoCoreError, ClientError) as e:
             raise HTTPException(status_code=500, detail=f"Rekognition get_content_moderation failed: {e}")
+    is_safe = len(labels) == 0
+    return {"safe": is_safe, "labels": labels}
 
-    return {"safe": len(labels) == 0, "labels": labels}
-
+# -------------------------------
+# Fixed RunwayML SDK call
+# -------------------------------
 def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str) -> str:
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
             status_code=500,
-            detail="`runwayml` SDK not installed."
+            detail="`runwayml` SDK not installed. Add `runwayml>=1.0.0` to requirements.txt."
         )
     try:
+        # UPDATED: Use correct SDK arguments
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
-            input_video=video_url,  # updated argument
-            prompt=prompt_text,     # updated argument
+            prompt_video=video_url,   # correct param name in SDK
+            prompt_text=prompt_text,
             ratio=ratio
         )
         task_id = task.id
+
+        # Keep existing polling (no changes requested)
         while True:
             status = RUNWAY_CLIENT.tasks.retrieve(task_id)
             if status.status in ["SUCCEEDED", "FAILED"]:
@@ -173,10 +179,12 @@ def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, rat
 
         if status.status == "FAILED":
             raise HTTPException(status_code=500, detail="RunwayML task failed.")
+
         if not status.output:
             raise HTTPException(status_code=500, detail="RunwayML returned no output.")
 
         return status.output[0]
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RunwayML error: {e}")
 
@@ -196,10 +204,7 @@ def healthz():
 @app.get("/upload-video")
 @app.head("/upload-video")
 def upload_video_info():
-    return {
-        "message": "POST a form-data 'file' (mp4/mov/webm/m4v) to /upload-video.",
-        "content_type": "multipart/form-data"
-    }
+    return {"message": "POST a form-data 'file' (mp4/mov/webm/m4v) to /upload-video."}
 
 @app.post("/upload-video")
 async def upload_video(file: UploadFile = File(...)):
@@ -207,18 +212,26 @@ async def upload_video(file: UploadFile = File(...)):
         ext = file.filename.split(".")[-1].lower()
         if ext not in ["mp4", "mov", "webm", "m4v"]:
             return JSONResponse(status_code=400, content={"error": "Invalid video format."})
+
         key = f"uploads/video/{uuid.uuid4()}.{ext}"
         contents = await file.read()
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=key, Body=contents, ContentType=file.content_type or f"video/{ext}")
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=key, Body=contents,
+                             ContentType=file.content_type or f"video/{ext}")
+
         job_id = _start_video_moderation(BUCKET_NAME, key)
         result = _poll_video_moderation(job_id)
+
         if not result["safe"]:
             try:
                 s3_client.delete_object(Bucket=BUCKET_NAME, Key=key)
             except Exception:
                 pass
-            return JSONResponse(status_code=400, content={"status": "REJECTED", "reason": "Video failed moderation.", "labels": result["labels"]})
+            return JSONResponse(status_code=400, content={"status": "REJECTED",
+                                                          "reason": "Video failed moderation",
+                                                          "labels": result["labels"]})
+
         return {"url": _public_s3_url(key), "status": "APPROVED"}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -227,47 +240,7 @@ async def upload_video(file: UploadFile = File(...)):
 @app.get("/generate-video")
 @app.head("/generate-video")
 def generate_video_info():
-    return {
-        "message": "POST JSON to /generate-video.",
-        "schema_example": {
-            "prompt_video": "https://image-to-video-library.s3.us-east-2.amazonaws.com/uploads/video/your-input.mp4",
-            "prompt_text": "optional text prompt",
-            "model": "gen3_alpha_turbo",
-            "ratio": "1280:720"
-        }
-    }
+    return {"message": "POST JSON to /generate-video."}
 
 @app.post("/generate-video")
-def generate_video(request: VideoToVideoRequest):
-    try:
-        input_url = str(request.prompt_video)
-        if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
-            src_key = _s3_key_from_presigned_or_path(input_url)
-        else:
-            src_key = _copy_external_video_to_bucket(input_url)
-
-        job_id = _start_video_moderation(BUCKET_NAME, src_key)
-        result = _poll_video_moderation(job_id)
-        if not result["safe"]:
-            return {"status": "REJECTED", "reason": "Video failed moderation.", "labels": result["labels"]}
-
-        s3_public_url = _public_s3_url(src_key)
-        output_url = _run_runway_video_to_video(
-            model=request.model,
-            video_url=s3_public_url,
-            prompt_text=request.prompt_text,
-            ratio=request.ratio
-        )
-
-        r = requests.get(output_url, stream=True, timeout=120)
-        r.raise_for_status()
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        with open(tmp_file.name, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        return FileResponse(tmp_file.name, media_type="video/mp4", filename="generated_video.mp4")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"API error: {e}")
+def generate
