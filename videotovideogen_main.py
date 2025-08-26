@@ -1,7 +1,7 @@
 # videotovideogen_main.py
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 import os
@@ -10,6 +10,7 @@ import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import asyncio
+import io
 
 # RunwayML SDK
 try:
@@ -66,7 +67,7 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 # Models
 # -----------------------------------------------------------------------------
 class VideoToVideoRequest(BaseModel):
-    prompt_video: HttpUrl
+    video: HttpUrl
     prompt_text: str = ""
     model: str = "gen3_alpha_turbo"
     ratio: str = "1280:720"
@@ -112,7 +113,6 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
             MinConfidence=min_confidence,
         )
         job_id = response["JobId"]
-        # Poll asynchronously
         while True:
             status = rekognition.get_content_moderation(JobId=job_id)
             if status["JobStatus"] in ["SUCCEEDED", "FAILED"]:
@@ -120,7 +120,6 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
             await asyncio.sleep(2)
         if status["JobStatus"] == "FAILED":
             raise HTTPException(status_code=500, detail="Rekognition moderation failed")
-        # Simple check: if any ModerationLabels are found, mark rejected
         if status.get("ModerationLabels"):
             raise HTTPException(status_code=400, detail="Video flagged by content moderation")
         return key
@@ -186,16 +185,27 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/generate-video")
 async def generate_video(request: VideoToVideoRequest):
-    input_url = str(request.prompt_video)
+    input_url = str(request.video)
     if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
         src_key = _s3_key_from_presigned_or_path(input_url)
     else:
         src_key = await _copy_external_video_to_bucket(input_url)
+
     s3_url = _public_s3_url(src_key)
+
     output_url = await _run_runway_video_to_video(
         model=request.model,
         video_url=s3_url,
         prompt_text=request.prompt_text,
         ratio=request.ratio
     )
-    return {"output_url": output_url, "status": "SUCCESS"}
+
+    # Return video directly
+    video_resp = requests.get(output_url, stream=True, timeout=300)
+    video_resp.raise_for_status()
+
+    return StreamingResponse(
+        io.BytesIO(video_resp.content),
+        media_type="video/mp4",
+        headers={"Content-Disposition": f"attachment; filename=generated_video.mp4"}
+    )
