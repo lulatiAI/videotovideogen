@@ -5,10 +5,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 import os
-import tempfile
-import requests
-import time
 import uuid
+import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -26,7 +24,7 @@ app = FastAPI(title="Video-to-Video Generation API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # tighten later if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,7 +44,7 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 if not (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY):
     raise RuntimeError("AWS credentials are missing (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)")
 
-BUCKET_NAME = "image-to-video-library"
+BUCKET_NAME = "image-to-video-library"  # your S3 bucket
 
 s3_client = boto3.client(
     "s3",
@@ -106,9 +104,12 @@ def _copy_external_video_to_bucket(external_url: str) -> str:
             maybe_ext = external_url.split("?")[0].split(".")[-1].lower()
             if maybe_ext in ["mp4", "mov", "webm", "m4v"]:
                 ext = maybe_ext
+
         unique_key = f"uploads/video/{uuid.uuid4()}.{ext}"
+
         resp = requests.get(external_url, stream=True, timeout=60)
         resp.raise_for_status()
+
         s3_client.upload_fileobj(resp.raw, BUCKET_NAME, unique_key, ExtraArgs={"ContentType": f"video/{ext}"})
         return unique_key
     except Exception as e:
@@ -125,6 +126,7 @@ def _start_video_moderation(bucket: str, key: str, min_confidence: int = 80) -> 
         raise HTTPException(status_code=500, detail=f"Rekognition start_content_moderation failed: {e}")
 
 def _poll_video_moderation(job_id: str, max_wait_seconds: int = 120, poll_every: int = 4) -> dict:
+    import time
     waited = 0
     labels = []
     next_token = None
@@ -148,12 +150,10 @@ def _poll_video_moderation(job_id: str, max_wait_seconds: int = 120, poll_every:
                 continue
         except (BotoCoreError, ClientError) as e:
             raise HTTPException(status_code=500, detail=f"Rekognition get_content_moderation failed: {e}")
+
     is_safe = len(labels) == 0
     return {"safe": is_safe, "labels": labels}
 
-# -------------------------------
-# Fixed RunwayML SDK call
-# -------------------------------
 def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str) -> str:
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
@@ -161,30 +161,23 @@ def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, rat
             detail="`runwayml` SDK not installed. Add `runwayml>=1.0.0` to requirements.txt."
         )
     try:
-        # UPDATED: Use correct SDK arguments
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
-            prompt_video=video_url,   # correct param name in SDK
+            prompt_video=video_url,
             prompt_text=prompt_text,
             ratio=ratio
         )
         task_id = task.id
 
-        # Keep existing polling (no changes requested)
         while True:
             status = RUNWAY_CLIENT.tasks.retrieve(task_id)
             if status.status in ["SUCCEEDED", "FAILED"]:
                 break
-            time.sleep(5)
-
         if status.status == "FAILED":
             raise HTTPException(status_code=500, detail="RunwayML task failed.")
-
-        if not status.output:
+        if not status.output or not status.output[0]:
             raise HTTPException(status_code=500, detail="RunwayML returned no output.")
-
         return status.output[0]
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RunwayML error: {e}")
 
@@ -204,7 +197,10 @@ def healthz():
 @app.get("/upload-video")
 @app.head("/upload-video")
 def upload_video_info():
-    return {"message": "POST a form-data 'file' (mp4/mov/webm/m4v) to /upload-video."}
+    return {
+        "message": "POST a form-data 'file' (mp4/mov/webm/m4v) to /upload-video.",
+        "content_type": "multipart/form-data"
+    }
 
 @app.post("/upload-video")
 async def upload_video(file: UploadFile = File(...)):
@@ -215,8 +211,13 @@ async def upload_video(file: UploadFile = File(...)):
 
         key = f"uploads/video/{uuid.uuid4()}.{ext}"
         contents = await file.read()
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=key, Body=contents,
-                             ContentType=file.content_type or f"video/{ext}")
+
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=key,
+            Body=contents,
+            ContentType=file.content_type or f"video/{ext}"
+        )
 
         job_id = _start_video_moderation(BUCKET_NAME, key)
         result = _poll_video_moderation(job_id)
@@ -226,9 +227,10 @@ async def upload_video(file: UploadFile = File(...)):
                 s3_client.delete_object(Bucket=BUCKET_NAME, Key=key)
             except Exception:
                 pass
-            return JSONResponse(status_code=400, content={"status": "REJECTED",
-                                                          "reason": "Video failed moderation",
-                                                          "labels": result["labels"]})
+            return JSONResponse(
+                status_code=400,
+                content={"status": "REJECTED", "reason": "Video failed moderation.", "labels": result["labels"]}
+            )
 
         return {"url": _public_s3_url(key), "status": "APPROVED"}
 
@@ -240,7 +242,47 @@ async def upload_video(file: UploadFile = File(...)):
 @app.get("/generate-video")
 @app.head("/generate-video")
 def generate_video_info():
-    return {"message": "POST JSON to /generate-video."}
+    return {
+        "message": "POST JSON to /generate-video.",
+        "schema_example": {
+            "prompt_video": "https://image-to-video-library.s3.us-east-2.amazonaws.com/uploads/video/your-input.mp4",
+            "prompt_text": "optional text prompt",
+            "model": "gen3_alpha_turbo",
+            "ratio": "1280:720"
+        }
+    }
 
 @app.post("/generate-video")
-def generate
+def generate_video(request: VideoToVideoRequest):
+    try:
+        input_url = str(request.prompt_video)
+        if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
+            src_key = _s3_key_from_presigned_or_path(input_url)
+        else:
+            src_key = _copy_external_video_to_bucket(input_url)
+
+        job_id = _start_video_moderation(BUCKET_NAME, src_key)
+        result = _poll_video_moderation(job_id)
+        if not result["safe"]:
+            try:
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=src_key)
+            except Exception:
+                pass
+            return JSONResponse(
+                status_code=400,
+                content={"status": "REJECTED", "reason": "Video failed moderation.", "labels": result["labels"]}
+            )
+
+        output_url = _run_runway_video_to_video(
+            model=request.model,
+            video_url=_public_s3_url(src_key),
+            prompt_text=request.prompt_text,
+            ratio=request.ratio
+        )
+
+        return {"url": output_url, "status": "SUCCESS"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Video generation failed: {e}")
