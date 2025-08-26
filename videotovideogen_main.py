@@ -69,10 +69,10 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 # Models
 # -----------------------------------------------------------------------------
 class VideoToVideoRequest(BaseModel):
-    prompt_video: HttpUrl                  # should be an S3 URL (we’ll copy it in if external)
+    prompt_video: HttpUrl                  # URL of input video (S3 or external)
     prompt_text: str = ""
-    model: str = "gen3_alpha_turbo"        # per your direction
-    ratio: str = "1280:720"                # keep same shape as image service; adjust if needed
+    model: str = "gen3_alpha_turbo"
+    ratio: str = "1280:720"
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -176,7 +176,6 @@ def _poll_video_moderation(job_id: str, max_wait_seconds: int = 120, poll_every:
         except (BotoCoreError, ClientError) as e:
             raise HTTPException(status_code=500, detail=f"Rekognition get_content_moderation failed: {e}")
 
-    # Decide safe vs not based on any labels present (you can refine with categories/confidence)
     is_safe = len(labels) == 0
     return {"safe": is_safe, "labels": labels}
 
@@ -184,8 +183,9 @@ def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, rat
     """
     Kick off RunwayML video-to-video and poll until done.
     Returns the output video URL.
+
+    NOTE: Runway expects 'input_video' and 'prompt' (NOT 'prompt_video' / 'prompt_text').
     """
-    # Prefer SDK (matches your other service). If not available, raise a clear error.
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
             status_code=500,
@@ -193,10 +193,11 @@ def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, rat
         )
 
     try:
+        # ---- FIXED FIELDS HERE ----
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
-            prompt_video=video_url,
-            prompt_text=prompt_text,
+            input_video=video_url,   # was prompt_video
+            prompt=prompt_text,      # was prompt_text
             ratio=ratio
         )
         task_id = task.id
@@ -305,7 +306,7 @@ def generate_video(request: VideoToVideoRequest):
     """
     1) Ensure the input video is in our S3 bucket (copy if external).
     2) Run Rekognition Video moderation (block if flagged).
-    3) Call RunwayML video-to-video (gen3_alpha_turbo).
+    3) Call RunwayML video-to-video.
     4) Stream resulting video file back to client.
     """
     try:
@@ -318,5 +319,37 @@ def generate_video(request: VideoToVideoRequest):
             src_key = _copy_external_video_to_bucket(input_url)
 
         # 2) Moderate the S3 video
-        job_id =_
+        job_id = _start_video_moderation(BUCKET_NAME, src_key)
+        result = _poll_video_moderation(job_id)
+        if not result["safe"]:
+            return {
+                "status": "REJECTED",
+                "reason": "Video failed moderation.",
+                "labels": result["labels"]
+            }
 
+        # 3) Call RunwayML
+        s3_public_url = _public_s3_url(src_key)
+        output_url = _run_runway_video_to_video(
+            model=request.model,
+            video_url=s3_public_url,
+            prompt_text=request.prompt_text,
+            ratio=request.ratio
+        )
+
+        # 4) Download the resulting video and return as file
+        r = requests.get(output_url, stream=True, timeout=120)
+        r.raise_for_status()
+
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        with open(tmp_file.name, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        return FileResponse(tmp_file.name, media_type="video/mp4", filename="generated_video.mp4")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"API error: {e}")
