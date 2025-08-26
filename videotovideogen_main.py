@@ -69,7 +69,7 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 class VideoToVideoRequest(BaseModel):
     video: HttpUrl
     prompt_text: str = ""
-    model: str = "gen3_alpha_turbo"
+    model: str = "gen3_alpha_turbo"  # force Gen 3 only
     ratio: str = "1280:720"
 
 # -----------------------------------------------------------------------------
@@ -185,6 +185,9 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/generate-video")
 async def generate_video(request: VideoToVideoRequest):
+    # Use Gen 3 only
+    request.model = "gen3_alpha_turbo"
+
     input_url = str(request.video)
     if _is_s3_url(input_url) and _s3_key_from_presigned_or_path(input_url):
         src_key = _s3_key_from_presigned_or_path(input_url)
@@ -200,7 +203,7 @@ async def generate_video(request: VideoToVideoRequest):
         ratio=request.ratio
     )
 
-    # Return video directly
+    # Return the video content directly for frontend
     video_resp = requests.get(output_url, stream=True, timeout=300)
     video_resp.raise_for_status()
 
