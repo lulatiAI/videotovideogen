@@ -9,7 +9,6 @@ import uuid
 import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-import asyncio
 import io
 
 # RunwayML SDK
@@ -69,7 +68,7 @@ RUNWAY_CLIENT = RunwayML(api_key=RUNWAY_API_KEY) if RUNWAY_SDK_AVAILABLE else No
 class VideoToVideoRequest(BaseModel):
     video: HttpUrl
     prompt_text: str = ""
-    model: str = "gen3_alpha_turbo"  # force Gen 3 only
+    model: str = "gen3_alpha_turbo"
     ratio: str = "1280:720"
 
 # -----------------------------------------------------------------------------
@@ -126,19 +125,6 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
     except (BotoCoreError, ClientError) as e:
         raise HTTPException(status_code=500, detail=f"Rekognition error: {e}")
 
-async def _poll_runway_task(task_id: str) -> str:
-    while True:
-        status = RUNWAY_CLIENT.tasks.retrieve(task_id)
-        if status.status in ["SUCCEEDED", "FAILED"]:
-            break
-        await asyncio.sleep(2)
-    if status.status == "FAILED":
-        raise HTTPException(status_code=500, detail="RunwayML task failed.")
-    output_url = status.output[0] if status.output else None
-    if not output_url:
-        raise HTTPException(status_code=500, detail="RunwayML returned no output.")
-    return output_url
-
 async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str) -> str:
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
@@ -146,11 +132,19 @@ async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: st
             detail="`runwayml` SDK not installed. Add `runwayml>=1.0.0` to requirements.txt."
         )
     try:
+        # Corrected: use `video_uri` and `prompt_text` like RunwayML example
         task = RUNWAY_CLIENT.video_to_video.create(
             model=model,
-            input={"video": video_url, "prompt": prompt_text, "ratio": ratio}
+            video_uri=video_url,
+            prompt_text=prompt_text,
+            ratio=ratio
         )
-        return await _poll_runway_task(task.id)
+        # Wait for the task to finish and return output URL
+        output_task = task.wait_for_task_output()
+        output_url = output_task.output[0] if output_task.output else None
+        if not output_url:
+            raise HTTPException(status_code=500, detail="RunwayML returned no output.")
+        return output_url
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RunwayML error: {e}")
 
@@ -185,7 +179,7 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/generate-video")
 async def generate_video(request: VideoToVideoRequest):
-    # Use Gen 3 only
+    # Force Gen 3 Alpha Turbo
     request.model = "gen3_alpha_turbo"
 
     input_url = str(request.video)
@@ -203,7 +197,7 @@ async def generate_video(request: VideoToVideoRequest):
         ratio=request.ratio
     )
 
-    # Return the video content directly for frontend
+    # Return video content directly for frontend
     video_resp = requests.get(output_url, stream=True, timeout=300)
     video_resp.raise_for_status()
 
