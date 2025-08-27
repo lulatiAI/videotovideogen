@@ -71,7 +71,6 @@ class VideoToVideoRequest(BaseModel):
     prompt_text: str
     model: str = "gen4_aleph"  # updated to Gen 4 Aleph
     ratio: str = "1280:720"
-    duration: int = 5  # default duration in seconds (5 or 10)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -127,7 +126,7 @@ async def _start_video_moderation(bucket: str, key: str, min_confidence: int = 8
     except (BotoCoreError, ClientError) as e:
         raise HTTPException(status_code=500, detail=f"Rekognition error: {e}")
 
-async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str, duration: int) -> str:
+async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: str, ratio: str) -> str:
     if not RUNWAY_SDK_AVAILABLE or RUNWAY_CLIENT is None:
         raise HTTPException(
             status_code=500,
@@ -139,8 +138,7 @@ async def _run_runway_video_to_video(model: str, video_url: str, prompt_text: st
             model=model,
             video_uri=video_url,
             prompt_text=prompt_text,
-            ratio=ratio,
-            duration=duration  # pass duration to Runway
+            ratio=ratio
         )
         output_task = task.wait_for_task_output()
         output_url = output_task.output[0] if output_task.output else None
@@ -170,7 +168,6 @@ async def upload_video(file: UploadFile = File(...)):
         return JSONResponse(status_code=400, content={"error": "Invalid video format."})
     key = f"uploads/video/{uuid.uuid4()}.{ext}"
     
-    # Streaming upload
     s3_client.upload_fileobj(
         file.file,
         BUCKET_NAME,
@@ -198,11 +195,9 @@ async def generate_video(request: VideoToVideoRequest):
         model=request.model,
         video_url=s3_url,
         prompt_text=request.prompt_text,
-        ratio=request.ratio,
-        duration=request.duration  # pass duration here
+        ratio=request.ratio
     )
 
-    # Return video content directly
     video_resp = requests.get(output_url, stream=True, timeout=300)
     video_resp.raise_for_status()
 
