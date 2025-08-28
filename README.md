@@ -52,3 +52,85 @@ This project powers the **Video-to-Video** page on [Lulati.com](https://www.lula
 
 ## 📂 Project Structure
 
+/frontend
+├── video-to-video.html # Main page
+├── generator.js # Frontend logic for upload, progress, and video rendering
+├── styles.css # Custom page styling
+
+/backend
+├── app.py # FastAPI backend
+├── utils/ # Helper scripts for S3 and AI model handling
+└── requirements.txt # Python dependencies
+
+Yaml
+---
+
+## 🔧 Installation
+
+### Frontend (Local Development)
+```bash
+# Clone the repository
+git clone https://github.com/your-username/video-to-video.git
+cd video-to-video/frontend
+
+Backend
+# Navigate to backend
+cd ../backend
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run server
+uvicorn app:app --reload
+
+🌐 Deployment
+
+Frontend is deployed via WordPress on a custom page.
+
+Backend is hosted on Render
+ with AWS S3 for video storage.
+
+🧪 Testing
+
+Upload multiple video types (.mp4, .mov, .avi)
+
+Check error handling for:
+
+Large files
+
+Unsupported formats
+
+Network failures
+
+🖼️ Demo
+
+Live Page: https://www.lulati.com/video-to-ai-video/
+
+Example Workflow:
+
+Upload your video.
+
+Wait for upload and generation progress.
+
+Preview or download your AI-transformed video.
+
+🧠 Future Enhancements
+
+Add user accounts with video history
+
+Support multiple AI transformation models
+
+Enhance UI for better animations and themes
+
+WebSocket support for real-time processing updates
+
+👨‍💻 Author
+
+Antoine Maxwell
+
+Email: antoinemaxwell0@gmail.com
+
+GitHub: @Lulatiai
+
+Portfolio: Lulati.com
+
