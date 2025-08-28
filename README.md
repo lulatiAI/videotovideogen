@@ -7,27 +7,45 @@ This project powers the **Video-to-Video** page on [Lulati.com](https://www.lula
 
 ## 🚀 Features
 
-- **Simple Upload:** Drag and drop or browse to select your video.
-- **Real-Time Progress:** Displays live upload percentages for a better UX.
-- **AI Processing:** Sends video to a backend API for AI-driven transformations.
-- **Instant Playback:** Streams the generated video in-browser once ready.
-- **Download Option:** Provides a direct download link for the processed video.
-- **Error Handling:** Clean error alerts and logs for smoother debugging.
+Seamless Video Uploads – Drag-and-drop or select videos from your device.
+
+Real-Time Upload Feedback – Progress bar with status updates for every stage of the upload.
+
+AI Video Generation – Powered by a custom inference pipeline for high-quality video transformation.
+
+Strict Content Moderation – All videos are screened with AWS Rekognition before processing.
+
+Scalable Storage – Uses Amazon S3 for reliable, secure storage and delivery.
+
+Fully Responsive UI – Works smoothly on desktop and mobile devices.
 
 ---
 
 ## 🛠️ Tech Stack
 
 **Frontend**
-- HTML5, CSS3, JavaScript (Vanilla)
-- jQuery (for lightweight DOM utilities)
-- WordPress integration
+HTML5, CSS3, JavaScript (Vanilla)
+
+AJAX / Fetch API for asynchronous requests
+
+Clean and responsive layout
 
 **Backend**
-- Python (FastAPI)
-- AWS S3 (for video storage)
-- Render (for backend hosting)
-- Custom AI inference pipeline
+Flask or FastAPI for API handling
+
+AWS Lambda for serverless moderation logic
+
+Amazon Rekognition for video content screening
+
+Amazon S3 for storage and delivery
+
+DevOps & Deployment
+
+Render for backend hosting
+
+GitHub for version control
+
+AWS SDKs for seamless integrations
 
 **Other Tools**
 - `boto3` for AWS operations  
@@ -35,18 +53,25 @@ This project powers the **Video-to-Video** page on [Lulati.com](https://www.lula
 
 ---
 
-## ⚙️ How It Works
+🔄 Custom AI Inference & Moderation Pipeline
 
-1. **User uploads video**  
-   - File is validated and sent to the backend API.
-2. **Video stored on S3**  
-   - Temporary storage in an S3 bucket for processing.
-3. **AI processing starts**  
-   - Video is analyzed and transformed by the AI model.
-4. **Processed video returned**  
-   - Downloadable `MP4` is streamed back to the user.
-5. **Playback and download**  
-   - User can preview or download their AI-enhanced video.
+The platform implements a custom pipeline to ensure content safety and reliability:
+
+Video Upload – Users upload a source video via the frontend.
+
+Content Moderation – The video is analyzed by AWS Rekognition for unsafe or prohibited content.
+
+Serverless Moderation Logic – An AWS Lambda function reviews moderation results:
+
+❌ If the video fails moderation, it is rejected and not processed.
+
+✅ If the video passes, it’s approved for generation.
+
+AI Processing – Approved videos are transformed through the custom AI inference model.
+
+Result Delivery – The generated video is stored in Amazon S3 and the URL is returned to the user.
+
+This ensures safety, compliance, and quality control in every request.
 
 ---
 
