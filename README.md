@@ -130,7 +130,8 @@ Antoine Maxwell
 
 Email: antoinemaxwell0@gmail.com
 
-GitHub: @Lulatiai
+GitHub: https://github.com/lulatiAI/videotovideogen
+GitHub@: Lulatiai
 
 Portfolio: Lulati.com
 
