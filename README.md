@@ -1,162 +1,66 @@
-# 🎥 Video-to-AI Video Generator
+🎥 AI Video-to-Video Generator
 
-Transform regular videos into AI-generated, enhanced videos in just a few clicks.  
-This project powers the **Video-to-Video** page on [Lulati.com](https://www.lulati.com/video-to-ai-video/), where users can upload videos, process them through an AI model, and instantly download the generated result.
+Transform existing videos into AI-enhanced versions with just a few clicks. This project powers the Video-to-Video page on Lulati.com
+, allowing users to upload videos and receive high-quality AI-transformed results instantly.
 
----
+🚀 Features
 
-## 🚀 Features
+Video-to-Video Transformation: Users can submit a source video, and AI generates an enhanced or stylized video automatically.
 
-Seamless Video Uploads – Drag-and-drop or select videos from your device.
+Cloud Storage: Uploaded videos and generated outputs are securely stored in Amazon S3 for reliable access.
 
-Real-Time Upload Feedback – Progress bar with status updates for every stage of the upload.
+Content Moderation: All videos are screened automatically using AWS Rekognition and Lambda to ensure safe, appropriate content.
 
-AI Video Generation – Powered by a custom inference pipeline for high-quality video transformation.
+AI Processing: Videos are processed using RunwayML’s advanced models (currently Gen 4 Aleph) for high-quality, realistic transformations.
 
-Strict Content Moderation – All videos are screened with AWS Rekognition before processing.
+Real-Time Feedback: Users receive status updates during the upload, moderation, and generation processes.
 
-Scalable Storage – Uses Amazon S3 for reliable, secure storage and delivery.
+Responsive Design: Works seamlessly across desktop and mobile devices.
 
-Fully Responsive UI – Works smoothly on desktop and mobile devices.
+Future-Ready: Designed to integrate Stripe for monetization, support multiple AI models, and eventually become a mobile application.
 
----
+🛠️ How It Works
 
-## 🛠️ Tech Stack
+Upload a Video: Users submit a video from their device.
 
-**Frontend**
-HTML5, CSS3, JavaScript (Vanilla)
+Moderation Check: The system automatically reviews the video content using AWS Rekognition and Lambda.
 
-AJAX / Fetch API for asynchronous requests
+AI Video Generation: If approved, the AI processes the video using RunwayML’s Gen 4 Aleph model to generate a transformed version.
 
-Clean and responsive layout
+Cloud Storage: The generated video is stored securely in Amazon S3.
 
-**Backend**
-Flask or FastAPI for API handling
+Delivery: Users can preview and download their AI-enhanced video.
 
-AWS Lambda for serverless moderation logic
+Progress Tracking: Users can see the status of each stage and track logs in real time.
 
-Amazon Rekognition for video content screening
+🌐 Live Demo
 
-Amazon S3 for storage and delivery
-
-DevOps & Deployment
-
-Render for backend hosting
-
-GitHub for version control
-
-AWS SDKs for seamless integrations
-
-**Other Tools**
-- `boto3` for AWS operations  
-- Progress monitoring and blob handling for video responses  
-
----
-
-🔄 Custom AI Inference & Moderation Pipeline
-
-The platform implements a custom pipeline to ensure content safety and reliability:
-
-Video Upload – Users upload a source video via the frontend.
-
-Content Moderation – The video is analyzed by AWS Rekognition for unsafe or prohibited content.
-
-Serverless Moderation Logic – An AWS Lambda function reviews moderation results:
-
-❌ If the video fails moderation, it is rejected and not processed.
-
-✅ If the video passes, it’s approved for generation.
-
-AI Processing – Approved videos are transformed through the custom AI inference model.
-
-Result Delivery – The generated video is stored in Amazon S3 and the URL is returned to the user.
-
-This ensures safety, compliance, and quality control in every request.
-
----
-
-## 📂 Project Structure
-
-/frontend
-├── video-to-video.html # Main page
-├── generator.js # Frontend logic for upload, progress, and video rendering
-├── styles.css # Custom page styling
-
-/backend
-├── app.py # FastAPI backend
-├── utils/ # Helper scripts for S3 and AI model handling
-└── requirements.txt # Python dependencies
-
-Yaml
----
-
-## 🔧 Installation
-
-### Frontend (Local Development)
-```bash
-# Clone the repository
-git clone https://github.com/your-username/video-to-video.git
-cd video-to-video/frontend
-
-Backend
-# Navigate to backend
-cd ../backend
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run server
-uvicorn app:app --reload
-
-🌐 Deployment
-
-Frontend is deployed via WordPress on a custom page.
-
-Backend is hosted on Render
- with AWS S3 for video storage.
-
-🧪 Testing
-
-Upload multiple video types (.mp4, .mov, .avi)
-
-Check error handling for:
-
-Large files
-
-Unsupported formats
-
-Network failures
-
-🖼️ Demo
-
-Live Page: https://www.lulati.com/video-to-ai-video/
+Experience the Video-to-Video Generator here: https://www.lulati.com/video-to-ai-video/
 
 Example Workflow:
 
-Upload your video.
+Upload a source video from your device.
 
-Wait for upload and generation progress.
+Wait while the AI processes and transforms the video.
 
-Preview or download your AI-transformed video.
+Preview and download your enhanced video.
 
-🧠 Future Enhancements
+🔮 Current Status & Goals
 
-Add user accounts with video history
+Current: Fully functional backend that generates AI videos from uploaded content, performs automated content moderation, and stores results securely.
 
-Support multiple AI transformation models
+Next Goals:
 
-Enhance UI for better animations and themes
+Integrate Stripe to monetize video generation.
 
-WebSocket support for real-time processing updates
+Support multiple AI models for different transformation styles.
 
-👨‍💻 Author
+Develop a mobile app to make the platform accessible on iOS and Android.
 
-Antoine Maxwell
+🧠 Why This Project Matters
 
-Email: antoinemaxwell0@gmail.com
+This project demonstrates the integration of AI processing, cloud infrastructure, content moderation, and backend workflows into a single functional platform. It shows how complex video processing can be made safe, scalable, and user-friendly, while remaining future-ready for monetization and mobile deployment.
 
-GitHub: https://github.com/lulatiAI/videotovideogen
-GitHub@: Lulatiai
+👨‍💻 About the Developer
 
-Portfolio: Lulati.com
-
+Antoine Maxwell is a full-stack developer with expertise in frontend design, backend workflows, cloud integration, and AI systems. This project is part of a broader portfolio of AI applications available at Lulati.com
